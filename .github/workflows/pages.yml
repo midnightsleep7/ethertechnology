@@ -1,0 +1,56 @@
+name: Validate and publish website
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      pages-enabled: ${{ steps.pages-status.outputs.enabled }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Validate website files
+        run: node scripts/validate.mjs
+      - name: Check catalogue interactions
+        run: node --test tests/catalogue.test.mjs
+      - name: Check whether Pages is enabled
+        id: pages-status
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/pages-status.mjs
+      - name: Upload website
+        if: github.event_name != 'pull_request' && steps.pages-status.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+  deploy:
+    if: github.event_name != 'pull_request' && needs.validate.outputs.pages-enabled == 'true'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish website
+        id: deployment
+        uses: actions/deploy-pages@v4
